@@ -1,17 +1,18 @@
 import { VertexAI } from "@google-cloud/vertexai";
+import { SearchServiceClient } from "@google-cloud/discoveryengine";
 
 const PROJECT_ID = process.env.GCP_PROJECT_ID!;
-const LOCATION = "us-central1";
+const LOCATION = "global"; // Discovery Engine SIEMPRE usa "global"
 const DATASTORE_ID = process.env.GCP_DATASTORE_ID!;
 
-// Cliente del modelo Gemini
+// Cliente de Gemini
 const vertex = new VertexAI({
   project: PROJECT_ID,
-  location: LOCATION,
+  location: "us-central1",
 });
 
-// Cliente de Vertex AI Search (DataStore)
-const searchClient = new VertexAISearchClient();
+// Cliente oficial de Vertex AI Search
+const searchClient = new SearchServiceClient();
 
 
 // ------------------------------------------------------------
@@ -19,18 +20,20 @@ const searchClient = new VertexAISearchClient();
 // ------------------------------------------------------------
 async function searchInDocs(query: string): Promise<string> {
   try {
-    const [response] = await searchClient.search({
-      dataStore: DATASTORE_ID,
-      query: { query },
-    });
+    const request = {
+      servingConfig: `projects/${PROJECT_ID}/locations/${LOCATION}/dataStores/${DATASTORE_ID}/servingConfigs/default_config`,
+      query,
+      pageSize: 5,
+    };
 
-    if (!response.results || response.results.length === 0) {
-      return "";
-    }
+    const [response] = await searchClient.search(request);
 
-    // Concatenamos los chunks relevantes
-    const context = response.results
-      .map((r) => r.document?.derivedStructData?.content || "")
+    const results = (response as any).results ?? [];
+
+    if (results.length === 0) return "";
+
+    const context = results
+      .map((r: any) => r.document?.structData?.content || "")
       .join("\n\n");
 
     return context;
@@ -41,46 +44,36 @@ async function searchInDocs(query: string): Promise<string> {
 }
 
 
+
 // ------------------------------------------------------------
-// 2️⃣ Preguntar a Gemini usando el contexto recuperado
+// 2️⃣ Consultar Gemini con contexto
 // ------------------------------------------------------------
 export async function askGeminiWithDocs(question: string): Promise<string> {
-  try {
-    const context = await searchInDocs(question);
+  const context = await searchInDocs(question);
 
-    const generativeModel = vertex.getGenerativeModel({
-      model: "gemini-2.5-pro",
-    });
+  const generativeModel = vertex.getGenerativeModel({
+    model: "gemini-2.5-pro",
+  });
 
-    const systemPrompt =
-      context.length > 0
-        ? "Eres un asistente experto en anemia y nutrición infantil. Responde únicamente usando la información encontrada en los documentos."
-        : "No encontraste información relevante en los documentos. Responde: 'No tengo información en los documentos para responder esta pregunta.'";
+  const systemPrompt =
+    context.length > 0
+      ? "Responde únicamente usando el contexto de los documentos."
+      : "No encontré información relevante en los documentos.";
 
-    const finalPrompt =
-      context.length > 0
-        ? `Contexto recuperado de los documentos:\n${context}\n\nPregunta: ${question}`
-        : question;
+  const finalPrompt =
+    context.length > 0
+      ? `Contexto:\n${context}\n\nPregunta: ${question}`
+      : question;
 
-    const result = await generativeModel.generateContent({
-      contents: [
-        {
-          role: "system",
-          parts: [{ text: systemPrompt }],
-        },
-        {
-          role: "user",
-          parts: [{ text: finalPrompt }],
-        },
-      ],
-    });
+  const response = await generativeModel.generateContent({
+    contents: [
+      { role: "system", parts: [{ text: systemPrompt }] },
+      { role: "user", parts: [{ text: finalPrompt }] },
+    ],
+  });
 
-    return (
-      result.response.candidates?.[0].content.parts?.[0].text ??
-      "No pude generar una respuesta válida."
-    );
-  } catch (err) {
-    console.error("❌ Error consultando Gemini:", err);
-    return "Ocurrió un error interno al generar la respuesta.";
-  }
+  return (
+    response.response.candidates?.[0].content.parts?.[0].text ??
+    "No pude generar una respuesta."
+  );
 }
