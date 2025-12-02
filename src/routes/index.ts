@@ -1,12 +1,15 @@
-// src/index.ts
 import express from 'express';
-import chatRoutes from './routes/chat';
+import chatRoutes from './chat';
+import dotenv from "dotenv";
+
+dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 
 app.use(express.json());
 
+// Aquí montas tus rutas
 app.use('/chat', chatRoutes);
 
 app.get('/', (_req, res) => {

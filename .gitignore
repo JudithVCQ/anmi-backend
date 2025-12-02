@@ -1,5 +1,6 @@
 # Node modules
 node_modules/
+google-key.json
 
 # Build output
 dist/
@@ -20,8 +21,6 @@ logs/
 # OS specific
 .DS_Store
 Thumbs.db
-
-
 
 # WebStorm / JetBrains
 .idea/
